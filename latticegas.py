@@ -1,4 +1,5 @@
 import numpy as np
+from numba import njit
 
 class LatticeGas():
     
@@ -23,7 +24,7 @@ class LatticeGas():
         #self.yc = obstacle['yc']
         #self.r = obstacle['r']
 
-        self.vi = self.u_lb*self.r/self.Re
+        self.vi = self.u_lb*obstacle['r']/self.Re
         self.omega = 1/(3*self.vi + 0.5)
 
         self.f_in = np.zeros((9, self.n_x, self.n_y))
@@ -33,7 +34,6 @@ class LatticeGas():
         self.__init_velo()
         self.__init_f_in()
 
-    
     def __init_velo(self):
         """
         Init vectors filed of velosity 'u' in each pint
@@ -71,9 +71,9 @@ class LatticeGas():
         Returns:
             dict: {'x': list, 'y': list}
         """
-        if  xc+r >= shape[0] or\
+        if  xc+r >= shape[0]-1 or\
             xc-r <= 0 or\
-            yc+r >= shape[1] or\
+            yc+r >= shape[1]-1 or\
             yc-r <= 0:
             raise ValueError("Circle out of field")
 
@@ -96,7 +96,7 @@ class LatticeGas():
             of propagation
         """
         for i in range(3):
-            f_in[-1,:,8-i] = f_in[-1,:,i]
+            f_in[8-i,-1,:] = f_in[i,-1,:]
     
     @staticmethod
     def calc_u(density: np.ndarray, f_in: np.ndarray, v: np.ndarray) -> np.ndarray:
@@ -132,7 +132,10 @@ class LatticeGas():
         Returns:
             np.ndarray: f_i equal with sahpe (x, y)
         """
-        return density*self._a[i]*(1 + 3*u@self._v[i] + 4.5*(u@self._v[i])**2 - 1.5*np.linalg.norm(u)**2)
+        if u.shape[:-1] != density.shape:
+            raise ValueError(f"incorrect shape 'u' ({u.shape[:-1]}) and 'density' ({density.shape})")
+
+        return density*self._a[i]*(1 + 3*u@self._v[i] + 4.5*(u@self._v[i])**2 - 1.5*np.linalg.norm(u, axis=-1)**2)
 
     def calc_inflow(self):
         """
@@ -164,7 +167,7 @@ class LatticeGas():
         Calculate post-collision process
         """
         for i, direct in enumerate(self._v):
-            self.f_in[0] = np.roll(np.roll(self.f_out[i], direct[0], axis=1), direct[1], axis=0)
+            self.f_in[i] = np.roll(np.roll(self.f_out[i], direct[1], axis=1), direct[0], axis=0)
 
 
     def solve(self, n_step=100_000, step_frame = 100):
@@ -177,6 +180,21 @@ class LatticeGas():
             self.calc_f_out()
             self.bounce_back()
             self.collision()
-            
-        pass
 
+            if time%step_frame == 0:
+                self.__save()
+
+    def __save(self):
+        if not hasattr(self, 'field_u'):
+            self.field_u = []
+        if not hasattr(self, 'field_den'):
+            self.field_den = []
+        #if not hasattr(self, 'field_vec_u'):
+        #   self.field_vec_u = []
+        
+        self.field_u.append(np.linalg.norm(self.u, axis=-1))
+        self.field_den.append(self.density)
+
+    @property
+    def field_p(self):
+        return np.array(self.field_den)/3
