@@ -51,13 +51,13 @@ def test_initial():
     assert model.u[:, :, -1].sum().astype(int) == 0
     assert model.f_in.shape == (9, parametrs['nx'], parametrs['ny'])
 
-def tesr_calc_u():
+def test_calc_u():
 
     shape = (5, 3)
     density = np.ones(shape)
     v = np.array([[-1, 0], [0, 1], [1, 0], [0, -1]])
     f_in = np.ones((len(v), *shape))
-    u = lgas.LatticeGas.calc_u(density, f_in, v)
+    u = lgas.LatticeGas.calc_u(density[:,:,np.newaxis], f_in[:,:,:,np.newaxis], v)
     answer = np.zeros((*shape, 2))
     assert u.shape == (*shape, 2)
     assert np.allclose(answer, u)

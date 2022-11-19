@@ -1,5 +1,5 @@
 import numpy as np
-from numba import njit
+from numba import njit, prange
 
 class LatticeGas():
     
@@ -87,6 +87,7 @@ class LatticeGas():
         return occupied
 
     @staticmethod
+    @njit()
     def calc_outflow(f_in: np.ndarray):
         """Calculate outflow 
         boundary condition
@@ -95,10 +96,11 @@ class LatticeGas():
             f_in (ndarray): filed of possible directions
             of propagation
         """
-        for i in range(3):
+        for i in prange(3):
             f_in[8-i,-1,:] = f_in[i,-1,:]
     
     @staticmethod
+    @njit()
     def calc_u(density: np.ndarray, f_in: np.ndarray, v: np.ndarray) -> np.ndarray:
         """Calculate field of velosity vectors 'u'
 
@@ -111,12 +113,13 @@ class LatticeGas():
         Returns:
             np.ndarray: field of vectors ''u
         """
-        u = np.zeros((*f_in.shape, 2))
-        for i in f_in.shape[0]:
-            for j in f_in.shape[1]:
-                for k in f_in.shape[2]:
-                    u[i, j, k] = f_in[i, j, k]*v[i]/density[j,k]
-        u = np.sum(u, axis=0)
+        u = np.zeros((*f_in.shape[:-1], 2))
+        for i in prange(f_in.shape[0]):
+            u[i] = f_in[i]*v[i]
+            #for j in range(f_in.shape[1]):
+            #    for k in range(f_in.shape[2]):
+            #       u[i, j, k] = f_in[i, j, k]*v[i]/density[j,k]  
+        u = np.sum(u, axis=0)/density
         return u
 
     def calc_f_eq_i(self, i: int, u: np.ndarray, density: np.ndarray) -> np.ndarray:
@@ -169,13 +172,12 @@ class LatticeGas():
         for i, direct in enumerate(self._v):
             self.f_in[i] = np.roll(np.roll(self.f_out[i], direct[1], axis=1), direct[0], axis=0)
 
-
     def solve(self, n_step=100_000, step_frame = 100):
 
         for time in range(n_step):
             self.calc_outflow(self.f_in)
             self.density = np.sum(self.f_in, axis=0)
-            self.u = self.calc_u(self.density, self.f_in, self._v)
+            self.u = self.calc_u(self.density[:, :, np.newaxis], self.f_in[:, :, :, np.newaxis], self._v)
             self.calc_inflow()
             self.calc_f_out()
             self.bounce_back()
