@@ -1,2 +1,5 @@
-__pycache__
+__pycache__/
 .ipynb_checkpoints
+.pytest_cache
+data
+latticegas_copy.py
