@@ -1,12 +1,18 @@
 import numpy as np
 from numba import njit, prange
 
+# num of directions
+N = 9
+
 class LatticeGas():
     
     _a = np.array([1/36, 1/9, 1/36, 1/9, 4/9, 1/9, 1/36, 1/9, 1/36])
-    _v = np.array([[1, 1], [1, 0], [1, -1], [0, 1], 
-                      [0, 0], 
-                      [0, -1], [-1, 1], [-1, 0], [-1, -1]])
+    _index = np.arange(N)
+    _vx = np.array([1, 1, 1, 0, 0, 0, -1, -1, -1])
+    _vy = np.array([1, 0, -1, 1, 0, -1, 1, 0, -1])
+    _ind_right = [8, 7, 6]
+    _ind_middle = [3, 4, 5]
+    _ind_left = [0, 1, 2]
 
     def __init__(self, parametrs: dict, obstacle: dict) -> None:
         """Initialized filed of flow and
@@ -20,15 +26,13 @@ class LatticeGas():
         self.n_y = parametrs['ny']
         self.u_lb = parametrs['u_lb']
         self.Re = parametrs['Re']
-        #self.xc = obstacle['xc']
-        #self.yc = obstacle['yc']
-        #self.r = obstacle['r']
 
         self.vi = self.u_lb*obstacle['r']/self.Re
         self.omega = 1/(3*self.vi + 0.5)
 
-        self.f_in = np.zeros((9, self.n_x, self.n_y))
-        self.f_out = np.zeros((9, self.n_x, self.n_y))
+        self.f_in = np.ones((self.n_x, self.n_y, N))
+        self.f_out = np.ones((self.n_x, self.n_y, N))
+        self.f_equil = np.ones((self.n_x, self.n_y, N))
         self.density = np.ones((self.n_x, self.n_y))
         self.obstacle = self.add_cylinder(obstacle['xc'], obstacle['yc'], obstacle['r'], (self.n_x, self.n_y))
         self.__init_velo()
@@ -40,10 +44,10 @@ class LatticeGas():
         with small disturbance
         Shape (nx, ny, 2)
         """
-        y = np.arange(self.n_y)
-        v_init = self.u_lb*(1 + 1e-4*np.sin(2*np.pi/(self.n_y-1)*y))
-        zeros = np.zeros(self.n_y)
-        self.u = np.array([np.column_stack((v_init, zeros)) for _ in range(self.n_x)])
+        self.u_y = np.zeros((self.n_x, self.n_y))
+        self.u_x = np.zeros((self.n_x, self.n_y))
+        self.v_init = self.u_lb*(1 + 1e-4*np.sin(2*np.pi/(self.n_y-1)*np.arange(self.n_y)))
+        self.u_x[:,] += self.v_init 
 
     def __init_f_in(self):
         """
@@ -51,12 +55,13 @@ class LatticeGas():
         of propagation
         Shape (9, nx, ny)
         """
-        for i in range(9):
-            self.f_in[i,:,:] = self.density*self._a[i]*(1 + 3*(self.u@self._v[i]) + 4.5*(self.u@self._v[i])**2 \
-                                - 1.5*np.linalg.norm(self.u, axis=2)**2)
+        for i, vx, vy, a in zip(self._index, self._vx, self._vy, self._a):
+            dot  = self.u_x*vx + self.u_y*vy
+            norma = self.u_x**2 + self.u_y**2
+            self.f_in[:, :, i] = self.density*a*(1 + 3*dot + 4.5*dot**2 - 1.5*norma)
     
     @staticmethod
-    def add_cylinder(xc: int, yc: int, r: int, shape: tuple) -> dict:
+    def add_cylinder(xc: int, yc: int, r: int, shape: tuple) -> np.ndarray:
         """Add circle oh filed
 
         Args:
@@ -77,17 +82,12 @@ class LatticeGas():
             yc-r <= 0:
             raise ValueError("Circle out of field")
 
-        occupied = {'x':[], 'y':[]}
-        for x in range(xc-r-1, xc+r+1):
-            for y in range(yc-r-1, yc+r+1):
-                if (x-xc)**2 + (y-yc)**2 <= r**2:
-                    occupied['x'].append(x)
-                    occupied['y'].append(y)
-
-        return occupied
+        x, y = np.meshgrid(np.arange(shape[1]), np.arange(shape[0])) 
+        cylinder = (x - xc)**2 + (y - yc)**2 <= r**2
+        return cylinder
 
     @staticmethod
-    @njit()
+    @njit
     def calc_outflow(f_in: np.ndarray):
         """Calculate outflow 
         boundary condition
@@ -96,12 +96,15 @@ class LatticeGas():
             f_in (ndarray): filed of possible directions
             of propagation
         """
-        for i in prange(3):
-            f_in[8-i,-1,:] = f_in[i,-1,:]
+        index = [6, 7, 8]
+        #for i in index:
+        #    f_in[i, -1, :] = f_in[i, -2, :]
+        f_in[index, -1, :] = f_in[index, -2, :]
+        return f_in
     
     @staticmethod
-    @njit()
-    def calc_u(density: np.ndarray, f_in: np.ndarray, v: np.ndarray) -> np.ndarray:
+    @njit
+    def calc_u(density: np.ndarray, f_in: np.ndarray, vx: np.ndarray, vy: np.ndarray) -> np.ndarray:
         """Calculate field of velosity vectors 'u'
 
         Args:
@@ -113,89 +116,85 @@ class LatticeGas():
         Returns:
             np.ndarray: field of vectors ''u
         """
-        u = np.zeros((*f_in.shape[:-1], 2))
-        for i in prange(f_in.shape[0]):
-            u[i] = f_in[i]*v[i]
-            #for j in range(f_in.shape[1]):
-            #    for k in range(f_in.shape[2]):
-            #       u[i, j, k] = f_in[i, j, k]*v[i]/density[j,k]  
-        u = np.sum(u, axis=0)/density
-        return u
+        ux = np.sum(f_in*vx, axis=-1)/density
+        uy = np.sum(f_in*vy, axis=-1)/density
+        return [ux, uy]
 
-    def calc_f_eq_i(self, i: int, u: np.ndarray, density: np.ndarray) -> np.ndarray:
-        """Calculate f equal in i-direction
-
-        Args:
-            i (int): index of direction
-            u (np.ndarray): filed of vectors felosity
-            density (np.ndarray): field of density
-        
-        Shape of u (x, y, 2) and density (x, y)
-
+    def calc_f_equil(self) -> np.ndarray:
+        """Calculate f equilimbrium
         Returns:
-            np.ndarray: f_i equal with sahpe (x, y)
+            np.ndarray: f equilimbrium with sahpe (x, y, N)
         """
-        if u.shape[:-1] != density.shape:
-            raise ValueError(f"incorrect shape 'u' ({u.shape[:-1]}) and 'density' ({density.shape})")
-
-        return density*self._a[i]*(1 + 3*u@self._v[i] + 4.5*(u@self._v[i])**2 - 1.5*np.linalg.norm(u, axis=-1)**2)
+        norma = self.u_x**2 + self.u_y**2
+        for i, vx, vy, a in zip(self._index, self._vx, self._vy, self._a):
+            dot  = self.u_x*vx + self.u_y*vy
+            self.f_equil[:,:,i] = self.density*a*(1 + 3*dot + 4.5*dot**2 - 1.5*norma)
 
     def calc_inflow(self):
         """
         Calculate inflow boundary condition
         """
-        for i in range(3):
-            self.f_in[i,0,:] = self.calc_f_eq_i(i, self.u[0,:,:], self.density[0,:]) \
-                                + (self.f_in[8-i, 0, :] - self.calc_f_eq_i(8-i, self.u[0, :, :], self.density[0, :]))
+        self.u_x[0] = self.v_init
+        self.u_y[0,:] = 0
+        rho_2 = np.sum(self.f_in[0,:,self._ind_middle], axis=0)
+        rho_3 = np.sum(self.f_in[0,:,self._ind_right], axis=0)
+        self.density[0, :] = 1/(1 - self.u_x[0]) * (rho_2 + 2*rho_3)
+
+        self.calc_f_equil()
+
+        self.f_in[0, :, self._ind_left] = self.f_equil[0,:, self._ind_left] +\
+                                            self.f_in[0,:, self._ind_right] -\
+                                            self.f_equil[0,:, self._ind_right]
             
     def calc_f_out(self):
         """
         Calculate pre-collision (f out)
         """
-        for i in range(9):
-            self.f_out[i,:,:] = self.f_in[i,:,:] - self.omega*(self.f_in[i,:,:]\
-                                 - self.calc_f_eq_i(i, self.u, self.density))
+        self.f_out = self.f_in - self.omega*(self.f_in - self.f_equil)
     
     def bounce_back(self):
         """
         Bounce-back boundary condition on 
         solid obstacle
         """
-        for i in range(9):
-            self.f_out[i][self.obstacle['x'], self.obstacle['y']] = \
-                -self.f_in[8-i][self.obstacle['x'], self.obstacle['y']]
+        bndry = self.f_in[self.obstacle,:]
+        self.f_out[self.obstacle,:] = bndry[:, self._index[::-1]]
 
     def collision(self):
         """
         Calculate post-collision process
         """
-        for i, direct in enumerate(self._v):
-            self.f_in[i] = np.roll(np.roll(self.f_out[i], direct[1], axis=1), direct[0], axis=0)
+        for i, vx, vy in zip(self._index, self._vx, self._vy):
+            self.f_in[:,:,i] = np.roll(
+                                    np.roll(self.f_out[:,:,i], vy, axis=1), 
+                                    vx, axis=0
+                                )
 
     def solve(self, n_step=100_000, step_frame = 100):
 
         for time in range(n_step):
-            self.calc_outflow(self.f_in)
-            self.density = np.sum(self.f_in, axis=0)
-            self.u = self.calc_u(self.density[:, :, np.newaxis], self.f_in[:, :, :, np.newaxis], self._v)
+
+            if time%step_frame == 0:
+                self.__save()
+
+            self.f_in = self.calc_outflow(self.f_in)
+            self.density = np.sum(self.f_in, axis=-1)
+            self.u_x, self.u_y = self.calc_u(self.density, self.f_in, self._vx, self._vy)
             self.calc_inflow()
             self.calc_f_out()
             self.bounce_back()
             self.collision()
 
-            if time%step_frame == 0:
-                self.__save()
-
     def __save(self):
-        if not hasattr(self, 'field_u'):
-            self.field_u = []
-        if not hasattr(self, 'field_den'):
-            self.field_den = []
-        #if not hasattr(self, 'field_vec_u'):
-        #   self.field_vec_u = []
+        if not hasattr(self, 'field_u'): self.field_u = []
+        if not hasattr(self, 'field_den'): self.field_den = []
+        if not hasattr(self, 'field_ux'): self.field_ux = []
+        if not hasattr(self, 'field_uy'): self.field_uy = []
         
-        self.field_u.append(np.linalg.norm(self.u, axis=-1))
+        self.field_u.append(np.sqrt(self.u_x**2 + self.u_y**2))
         self.field_den.append(self.density)
+        self.field_ux.append(self.u_x)
+        self.field_uy.append(self.u_y)
 
     @property
     def field_p(self):

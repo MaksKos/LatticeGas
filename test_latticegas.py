@@ -1,5 +1,5 @@
 import pytest
-import latticegas as lgas
+import latticegas_copy as lgas
 import numpy as np
 
 @pytest.mark.parametrize(
