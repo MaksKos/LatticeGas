@@ -1,5 +1,4 @@
 import numpy as np
-from numba import njit, prange
 
 # num of directions
 N = 9
@@ -42,7 +41,7 @@ class LatticeGas():
         """
         Init vectors filed of velosity 'u' in each pint
         with small disturbance
-        Shape (nx, ny, 2)
+        Shape ux and uy (nx, ny)
         """
         self.u_y = np.zeros((self.n_x, self.n_y))
         self.u_x = np.zeros((self.n_x, self.n_y))
@@ -51,9 +50,9 @@ class LatticeGas():
 
     def __init_f_in(self):
         """
-        Init field with 9 possible directions
+        Init field with N possible directions
         of propagation
-        Shape (9, nx, ny)
+        Shape (nx, ny, N)
         """
         for i, vx, vy, a in zip(self._index, self._vx, self._vy, self._a):
             dot  = self.u_x*vx + self.u_y*vy
@@ -74,7 +73,7 @@ class LatticeGas():
             ValueError: circle out of field size
 
         Returns:
-            dict: {'x': list, 'y': list}
+            np.ndarray <bool>: mask of cylinder nodes
         """
         if  xc+r >= shape[0]-1 or\
             xc-r <= 0 or\
@@ -87,7 +86,6 @@ class LatticeGas():
         return cylinder
 
     @staticmethod
-    @njit
     def calc_outflow(f_in: np.ndarray):
         """Calculate outflow 
         boundary condition
@@ -97,24 +95,21 @@ class LatticeGas():
             of propagation
         """
         index = [6, 7, 8]
-        #for i in index:
-        #    f_in[i, -1, :] = f_in[i, -2, :]
         f_in[index, -1, :] = f_in[index, -2, :]
         return f_in
     
     @staticmethod
-    @njit
     def calc_u(density: np.ndarray, f_in: np.ndarray, vx: np.ndarray, vy: np.ndarray) -> np.ndarray:
         """Calculate field of velosity vectors 'u'
 
         Args:
             density (np.ndarray): field of density
             f_in (np.ndarray): filed of possible directions
-            v (np.ndarray): list of normalize vectors of possible
-            directions
+            vx (np.ndarray): x coordinates of possible directions
+            vy (np.ndarray): x coordinates of possible directions
 
         Returns:
-            np.ndarray: field of vectors ''u
+            list: ux and ux fields
         """
         ux = np.sum(f_in*vx, axis=-1)/density
         uy = np.sum(f_in*vy, axis=-1)/density
