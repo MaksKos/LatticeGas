@@ -1,7 +1,8 @@
 import numpy as np
+import timeit
 
-# num of directions
-N = 9
+N = 9 # num of directions
+PROC_BAR_SCALE = 10
 
 class LatticeGas():
     
@@ -166,11 +167,14 @@ class LatticeGas():
                                 )
 
     def solve(self, n_step=100_000, step_frame = 100):
+        
+        process_bar_step = n_step//PROC_BAR_SCALE
+        time_start = timeit.default_timer()
 
-        for time in range(n_step):
-
-            if time%step_frame == 0:
-                self.__save()
+        for step in range(n_step):
+            
+            if step%process_bar_step == 0: print(f'Process: {int(step/n_step)} %, time: {(timeit.default_timer() -  time_start):.3f}')
+            if step%step_frame == 0: self.__save()
 
             self.f_in = self.calc_outflow(self.f_in)
             self.density = np.sum(self.f_in, axis=-1)
