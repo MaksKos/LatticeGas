@@ -173,7 +173,8 @@ class LatticeGas():
 
         for step in range(n_step):
             
-            if step%process_bar_step == 0: print(f'Process: {int(step/n_step)} %, time: {(timeit.default_timer() -  time_start):.3f}')
+            if step%process_bar_step == 0: print(f'Process: {int(step/n_step*100)} %,',
+                                                f' time: {(timeit.default_timer() -  time_start):.2f} s')
             if step%step_frame == 0: self.__save()
 
             self.f_in = self.calc_outflow(self.f_in)
